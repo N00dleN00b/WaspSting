@@ -1,0 +1,31 @@
+# Example: Paste raw bug bounty scope text here
+# WaspSting can parse this format directly with --scope scope.txt
+
+Program: Acme Corp Bug Bounty
+Platform: HackerOne
+Rewards: $100 - $10,000
+
+In Scope:
+• https://app.acmecorp.com
+• https://api.acmecorp.com
+• *.acmecorp.com
+• https://auth.acmecorp.com
+
+Out of Scope:
+• blog.acmecorp.com
+• status.acmecorp.com
+• Third-party integrations (Stripe, Zendesk)
+
+Vulnerability Types:
+• XSS
+• SQL Injection
+• IDOR / BOLA
+• Authentication Bypass
+• RCE
+• SSRF
+
+Rules:
+• No automated scanning
+• Rate limit to 10 requests/second
+• Do not test payment flows
+• Proof of concept required for all submissions
