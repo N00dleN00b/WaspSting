@@ -1,0 +1,42 @@
+name: WaspSting Security Scan
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  sast:
+    name: Static Analysis (OWASP Top 10:2025)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install WaspSting
+        run: pip install -r requirements.txt
+
+      - name: Run SAST scan
+        run: |
+          python waspsting.py \
+            --fast \
+            --mode sast \
+            --repo ${{ github.server_url }}/${{ github.repository }} \
+            --output ./security-output
+        # Exit code 2 = CRITICAL findings → fails the build
+        # Exit code 1 = findings present → warning only (change to || true to not fail)
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: waspsting-security-report
+          path: security-output/
+          retention-days: 30
