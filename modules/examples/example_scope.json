@@ -1,0 +1,44 @@
+{
+  "program_name": "Acme Corp Bug Bounty — HackerOne",
+  "platform": "HackerOne",
+  "reward_range": "$100 - $10,000",
+  "in_scope": [
+    "https://app.acmecorp.com",
+    "https://api.acmecorp.com",
+    "https://admin.acmecorp.com",
+    "*.acmecorp.com",
+    "https://auth.acmecorp.com"
+  ],
+  "out_of_scope": [
+    "blog.acmecorp.com",
+    "status.acmecorp.com",
+    "https://acmecorp.com/careers",
+    "Third-party services (Zendesk, Salesforce)",
+    "Physical security attacks",
+    "Social engineering"
+  ],
+  "vulnerability_types": [
+    "XSS",
+    "SQLi",
+    "IDOR",
+    "RCE",
+    "SSRF",
+    "Authentication Bypass",
+    "Business Logic",
+    "Privilege Escalation"
+  ],
+  "excluded_vuln_types": [
+    "Missing headers (no payout)",
+    "Self-XSS",
+    "Rate limiting on non-sensitive endpoints",
+    "Clickjacking without demonstrated impact"
+  ],
+  "special_rules": [
+    "No automated scanning tools (manual testing only)",
+    "Rate limit requests to max 10/second",
+    "Do not test payment processing endpoints",
+    "Require a working proof-of-concept for all submissions",
+    "Do not access or modify other users' data beyond your own test accounts"
+  ],
+  "notes": "Company uses React frontend, Node.js/Express API, PostgreSQL. Auth via JWT + OAuth2 (Google, GitHub)."
+}
