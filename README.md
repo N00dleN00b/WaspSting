@@ -31,16 +31,16 @@
 WaspSting is a Python CLI security tool for **authorized penetration testing, bug bounty hunting, and security research**. It solves one of the most tedious parts of pentesting — **documentation** — by auto-generating structured reports, evidence templates, and test plans as you work.
 
 **Key differentiators:**
-- 📋 **Auto-documentation** — fill-in evidence templates per finding, report writes itself
-- 🎯 **Bug bounty scope ingestion** — paste a program's scope, get a full phased test plan
-- 🌐 **Subdomain enumeration** — crt.sh + HackerTarget + DNS brute force, all free
-- 🖼️ **Asset gallery** — screenshots + metadata of every discovered subdomain
-- 💣 **Payload fuzzer** — SQLi, XSS, SSTI, SSRF, prompt injection, path traversal + custom wordlists
-- 🔔 **Live notifications** — Slack/Discord webhooks + GitHub Issues auto-created from findings
-- 🤖 **Local AI via Ollama** — code review + bounty insights, no API key, nothing leaves your machine
-- 📊 **Executive HTML report** — risk gauge, severity charts, filterable findings table
-- 🎯 **Burp Suite Community config** — pre-built scope, payloads, and Repeater requests
-- 🔗 **NVD CVE lookup** — free, no key required
+-  **Auto-documentation** — fill-in evidence templates per finding, report writes itself
+-  **Bug bounty scope ingestion** — paste a program's scope, get a full phased test plan
+-  **Subdomain enumeration** — crt.sh + HackerTarget + DNS brute force, all free
+-  **Asset gallery** — screenshots + metadata of every discovered subdomain
+-  **Payload fuzzer** — SQLi, XSS, SSTI, SSRF, prompt injection, path traversal + custom wordlists
+-  **Live notifications** — Slack/Discord webhooks + GitHub Issues auto-created from findings
+-  **Local AI via Ollama** — code review + bounty insights, no API key, nothing leaves your machine
+-  **Executive HTML report** — risk gauge, severity charts, filterable findings table
+-  **Burp Suite Community config** — pre-built scope, payloads, and Repeater requests
+-  **NVD CVE lookup** — free, no key required
 
 ---
 
@@ -48,15 +48,15 @@ WaspSting is a Python CLI security tool for **authorized penetration testing, bu
 
 | Module | Flag | Description |
 |--------|------|-------------|
-| 🔬 **SAST** | `--mode sast` | Clone a GitHub repo and scan for OWASP Top 10:2025 vulnerabilities |
-| 🌐 **Recon** | `--mode recon` | Security headers, tech fingerprint, CVE lookup |
-| 🔐 **Auth Audit** | `--mode auth` | Login lockout testing, JWT attack docs, credential audit |
-| 🎭 **BOLA/IDOR** | `--mode bola` | Sequential ID walking, documented test cases |
-| 🔧 **API Checks** | `--mode api` | Rate limiting, CORS, data exposure, injection probes |
-| 🌍 **Subdomain Enum** | `--mode enum` | crt.sh + HackerTarget + DNS brute force |
-| 💣 **Fuzzer** | `--mode fuzz` | Custom payload fuzzer — 9 categories + your own wordlists |
-| 🎯 **Bug Bounty** | `--mode bounty` | Ingest scope → AI-powered phased test plan |
-| 🔫 **Full Scan** | `--mode full` | Run all modules |
+| **SAST** | `--mode sast` | Clone a GitHub repo and scan for OWASP Top 10:2025 vulnerabilities |
+| **Recon** | `--mode recon` | Security headers, tech fingerprint, CVE lookup |
+| **Auth Audit** | `--mode auth` | Login lockout testing, JWT attack docs, credential audit |
+| **BOLA/IDOR** | `--mode bola` | Sequential ID walking, documented test cases |
+| **API Checks** | `--mode api` | Rate limiting, CORS, data exposure, injection probes |
+| **Subdomain Enum** | `--mode enum` | crt.sh + HackerTarget + DNS brute force |
+| **Fuzzer** | `--mode fuzz` | Custom payload fuzzer — 9 categories + your own wordlists |
+| **Bug Bounty** | `--mode bounty` | Ingest scope → AI-powered phased test plan |
+| **Full Scan** | `--mode full` | Run all modules |
 
 **Flags that work with any mode:**
 
