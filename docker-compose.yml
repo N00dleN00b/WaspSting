@@ -1,0 +1,54 @@
+# ── WaspSting docker-compose.yml ─────────────────────────────────────────────
+#
+# Profiles:
+#   default  — WaspSting only (no AI)
+#   ai       — WaspSting + Ollama sidecar (local AI, no API key needed)
+#
+# Usage:
+#   No AI:    docker compose run --rm waspsting --target https://target.com --mode recon --confirm
+#   With AI:  docker compose --profile ai run --rm waspsting --target https://target.com --mode full --confirm
+#
+# Reports land in ./output/ on your host machine automatically.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  waspsting:
+    image: n00dlen00b/waspsting:latest   # Docker Hub image name
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./output:/app/output             # Reports persist on host
+    environment:
+      - OLLAMA_HOST=http://ollama:11434  # Points to sidecar when AI profile active
+      - WASPSTING_SLACK_WEBHOOK=${WASPSTING_SLACK_WEBHOOK:-}
+      - WASPSTING_DISCORD_WEBHOOK=${WASPSTING_DISCORD_WEBHOOK:-}
+      - WASPSTING_GITHUB_TOKEN=${WASPSTING_GITHUB_TOKEN:-}
+      - WASPSTING_GITHUB_REPO=${WASPSTING_GITHUB_REPO:-}
+    network_mode: host                   # Lets tool reach localhost targets on host machine
+    stdin_open: true
+    tty: true
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ai"]                     # Only starts with: docker compose --profile ai up
+    volumes:
+      - ollama_models:/root/.ollama      # Cache pulled models between runs
+    ports:
+      - "11434:11434"
+    # Pull llama3 on first start if not already cached
+    entrypoint: >
+      sh -c "ollama serve &
+             sleep 3 &&
+             ollama pull llama3 &&
+             wait"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ollama_models:
+    driver: local

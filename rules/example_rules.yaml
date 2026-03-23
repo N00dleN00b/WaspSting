@@ -1,0 +1,148 @@
+# WaspSting custom OWASP rules — rules/example_rules.yaml
+#
+# Copy this file to rules/my_rules.yaml and customise.
+# All fields except id, name, owasp, severity, and at least one
+# match condition are optional.
+#
+# match fields available:
+#   response_body:  regex   — matched against HTTP response body
+#   source_code:    regex   — matched against source code files
+#   header_present: string  — header name that must exist
+#   header_absent:  string  — header name that must be missing
+#   header_value:   regex   — matched against "Header-Name: value"
+#   status_code:    [int]   — list of status codes to flag
+#
+# Set match_all: true to require ALL conditions (default is OR).
+# ──────────────────────────────────────────────────────────────────────────────
+
+- id: aws-key-exposure
+  name: AWS Access Key Exposed
+  owasp: A02
+  severity: CRITICAL
+  description: >
+    An AWS access key ID matching the AKIA/ASIA/AROA prefix pattern was
+    found in the response body or source code. Exposed keys can allow
+    full AWS account compromise.
+  tags: [secrets, aws, cloud, exposure]
+  match:
+    response_body: "AKIA[0-9A-Z]{16}"
+    source_code: "(AKIA|ASIA|AROA)[0-9A-Z]{16}"
+  fix: >
+    Rotate the key immediately in AWS IAM. Audit CloudTrail for
+    unauthorised usage. Remove from source and use IAM roles or
+    environment variables instead.
+  reference: https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html
+
+- id: private-key-in-source
+  name: Private Key Material in Source Code
+  owasp: A04
+  severity: CRITICAL
+  description: >
+    A PEM-encoded private key block was found in source code.
+    Private keys should never be committed to version control.
+  tags: [secrets, crypto, pki]
+  match:
+    source_code: "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----"
+  fix: >
+    Rotate the key immediately. Remove from git history using
+    git-filter-repo or BFG. Use a secrets manager or environment
+    variables for key material.
+
+- id: debug-mode-enabled
+  name: Application Debug Mode Enabled
+  owasp: A02
+  severity: HIGH
+  description: >
+    The application appears to be running in debug mode, which may
+    expose stack traces, internal paths, environment variables,
+    and source code snippets to unauthenticated users.
+  tags: [debug, misconfiguration, information-disclosure]
+  match:
+    response_body: "(Traceback \\(most recent call last\\)|DEBUG = True|display_errors = On|phpinfo\\(\\))"
+  fix: >
+    Disable debug mode in production. Set DEBUG=False (Django),
+    app.debug=False (Flask), or display_errors=Off (PHP).
+
+- id: sql-error-in-response
+  name: SQL Error Exposed in Response
+  owasp: A05
+  severity: HIGH
+  description: >
+    A database error message was returned in the HTTP response,
+    indicating possible SQL injection and leaking internal database details.
+  tags: [sqli, error-disclosure, injection]
+  match:
+    response_body: "(You have an error in your SQL syntax|ORA-[0-9]{5}|Microsoft OLE DB Provider for SQL Server|PostgreSQL.*ERROR|SQLite.*exception|Warning.*mysql_)"
+  fix: >
+    Implement parameterised queries. Suppress database error messages
+    in production. Use a generic error page.
+
+- id: server-version-disclosure
+  name: Server Version Disclosed in Header
+  owasp: A02
+  severity: LOW
+  description: >
+    The Server header reveals the web server software and version,
+    which helps attackers identify known CVEs.
+  tags: [information-disclosure, headers]
+  match:
+    header_value: "Server: (Apache|nginx|IIS|LiteSpeed)/[0-9]"
+  fix: >
+    Configure the server to omit or obscure the Server header.
+    Apache: ServerTokens Prod. Nginx: server_tokens off.
+
+- id: missing-x-frame-options
+  name: Clickjacking — X-Frame-Options Absent
+  owasp: A02
+  severity: MEDIUM
+  description: >
+    The X-Frame-Options header is missing, allowing the page to be
+    embedded in an iframe by an attacker for clickjacking attacks.
+  tags: [clickjacking, headers, misconfiguration]
+  match:
+    header_absent: X-Frame-Options
+  fix: >
+    Add: X-Frame-Options: DENY
+    Or use Content-Security-Policy: frame-ancestors 'none'
+
+- id: internal-ip-in-response
+  name: Internal IP Address Leaked in Response
+  owasp: A02
+  severity: MEDIUM
+  description: >
+    A private/internal IP address was found in the HTTP response,
+    revealing internal network topology.
+  tags: [information-disclosure, ssrf, recon]
+  match:
+    response_body: "(10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}|172\\.(1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3}|192\\.168\\.\\d{1,3}\\.\\d{1,3})"
+  fix: >
+    Strip internal IP addresses from API responses, error messages,
+    and HTTP headers before returning to clients.
+
+- id: hardcoded-password-source
+  name: Hardcoded Password in Source Code
+  owasp: A07
+  severity: HIGH
+  description: >
+    A hardcoded password assignment was found in source code.
+    Hardcoded credentials are a critical security risk.
+  tags: [secrets, auth, hardcoded-credentials]
+  match:
+    source_code: "(password|passwd|pwd|secret)\\s*=\\s*[\"'][^\"']{4,}[\"']"
+  fix: >
+    Remove hardcoded credentials. Use environment variables,
+    a secrets manager, or a vault solution.
+
+- id: error-500-on-fuzz
+  name: Internal Server Error Triggered
+  owasp: A10
+  severity: MEDIUM
+  description: >
+    The application returned HTTP 500, indicating an unhandled
+    exception. This may reveal injection points or logic errors.
+  tags: [error-handling, stability]
+  match:
+    status_code: [500, 502, 503]
+  fix: >
+    Implement global exception handling. Return generic error pages
+    in production. Log exceptions server-side for investigation.
