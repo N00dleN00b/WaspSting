@@ -46,3 +46,5 @@ waspsting_*/
 .pytest_cache/
 .coverage
 htmlcov/
+*.tar.gz
+*.zip
